@@ -1,0 +1,57 @@
+name: patuh consistency gate
+
+# Family consistency checks from irvan-putra/patuh, required for tagih.
+# On every push: source gate on the exact pushed tree. A manual dispatch
+# also builds a debug APK and byte-checks the packaged icon pre-publish,
+# and verifies the currently live release (post-publish mode).
+# The gate is pinned to the reviewed commit (tags are movable).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-gate:
+    uses: irvan-putra/patuh/.github/workflows/release-gate.yml@6f4b1eec2a8f73348725b7e3698d3e7bca93b890
+    with:
+      app: tagih
+      published: false
+
+  build-debug-apk:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+      - run: gradle -p android :app:assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          retention-days: 1
+
+  candidate-bytes-gate:
+    if: github.event_name == 'workflow_dispatch'
+    needs: build-debug-apk
+    uses: irvan-putra/patuh/.github/workflows/release-gate.yml@6f4b1eec2a8f73348725b7e3698d3e7bca93b890
+    with:
+      app: tagih
+      published: false
+      candidate_apk_artifact: debug-apk
+
+  verify-live-release:
+    if: github.event_name == 'workflow_dispatch'
+    uses: irvan-putra/patuh/.github/workflows/release-gate.yml@6f4b1eec2a8f73348725b7e3698d3e7bca93b890
+    with:
+      app: tagih
+      published: true

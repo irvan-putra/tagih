@@ -1,0 +1,109 @@
+name: release
+
+# Manual only: releases stay human-dispatched. Builds and signs the release
+# APK, gates publishing on the patuh source gate and the candidate APK byte
+# check, publishes a GitHub pre-release with the versioned APK + sha256,
+# then verifies the live release. Gate pinned to the reviewed commit.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  consistency:
+    # patuh pre-publish source gate: package, version format, label,
+    # permission/license drift, family icon geometry, badge reads the
+    # candidate version. A failure stops the release before anything builds.
+    uses: irvan-putra/patuh/.github/workflows/release-gate.yml@6f4b1eec2a8f73348725b7e3698d3e7bca93b890
+    with:
+      app: tagih
+      published: false
+
+  release:
+    needs: consistency
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+      - name: decode keystore
+        env:
+          SIGNING_KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE_B64 }}
+        run: echo "$SIGNING_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/keystore.jks"
+      - name: read version
+        id: v
+        run: |
+          VER=$(sed -n 's/^[[:space:]]*versionName "\(.*\)"/\1/p' android/app/build.gradle | head -1)
+          test -n "$VER"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+      - name: build signed release APK
+        env:
+          SIGNING_KEYSTORE_PATH: ${{ runner.temp }}/keystore.jks
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: gradle -p android :app:assembleRelease
+      - name: verify signature and stage candidate with family filename and checksum sidecar
+        run: |
+          set -euo pipefail
+          VER="${{ steps.v.outputs.version }}"
+          APK="android/app/build/outputs/apk/release/app-release.apk"
+          test -f "$APK"
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$BT/apksigner" verify --verbose --print-certs "$APK"
+          cp "$APK" "tagih-v${VER}.apk"
+          sha256sum "tagih-v${VER}.apk" | tee "tagih-v${VER}.apk.sha256"
+      - name: upload candidate for the byte check
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-apk
+          path: |
+            tagih-v*.apk
+            tagih-v*.apk.sha256
+          retention-days: 1
+
+  candidate-bytes:
+    # patuh checks the built APK's actual bytes (packaged icon badge, sha256
+    # logged for the sidecar) before anything is published. This is the
+    # preventive boundary: a defect here stops the release.
+    needs: release
+    uses: irvan-putra/patuh/.github/workflows/release-gate.yml@6f4b1eec2a8f73348725b7e3698d3e7bca93b890
+    with:
+      app: tagih
+      published: false
+      candidate_apk_artifact: candidate-apk
+
+  publish:
+    needs: candidate-bytes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: candidate-apk
+          path: dist
+      - name: publish pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VER="${{ needs.release.outputs.version }}"
+          gh release create "v${VER}" "dist/tagih-v${VER}.apk" "dist/tagih-v${VER}.apk.sha256" \
+            --title "tagih ${VER}" --generate-notes --prerelease --target "${GITHUB_SHA}"
+
+  verify:
+    # post-publish: verifies the live release (tag, APK name, checksum,
+    # downloaded sha256, packaged icon). Detects, cannot undo.
+    needs: publish
+    uses: irvan-putra/patuh/.github/workflows/release-gate.yml@6f4b1eec2a8f73348725b7e3698d3e7bca93b890
+    with:
+      app: tagih
+      published: true
