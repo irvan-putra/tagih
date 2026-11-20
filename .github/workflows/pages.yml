@@ -1,0 +1,42 @@
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths: [web/**, sdk/**, .github/workflows/pages.yml]
+  workflow_dispatch:
+
+permissions:
+  pages: write
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble site (copies of web/, Android assets untouched)
+        run: |
+          mkdir -p _site
+          cp -r web _site/web
+
+          python3 - <<'PY'
+          p='_site/web/index.html'
+          s=open(p,encoding='utf-8').read()
+          bar=('<div style="font:13px/1.5 system-ui,sans-serif;padding:10px 14px;margin:16px auto;max-width:720px;border-top:1px solid #8886;color:#666">'
+               'Tagih in the browser: data stays in this browser (localStorage) and clearing site data erases it. '
+               '<a href="https://github.com/irvan-putra/tagih/releases">Android app</a> · '
+               '<a href="https://github.com/irvan-putra/tagih">source</a> · '
+               '<a href="https://vanipy.com/kaji/apk/">all apps</a></div>')
+          assert '</body>' in s
+          open(p,'w',encoding='utf-8').write(s.replace('</body>',bar+'</body>',1))
+          PY
+          printf '<!doctype html><meta charset=utf-8><meta http-equiv=refresh content="0;url=web/"><a href="web/">Tagih</a>' > _site/index.html
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4
