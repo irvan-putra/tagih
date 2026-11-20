@@ -83,7 +83,9 @@ jobs:
       candidate_apk_artifact: candidate-apk
 
   publish:
-    needs: candidate-bytes
+    # needs both: candidate-bytes is the preventive gate, and release carries
+    # the version output (needs.<job>.outputs only covers direct needs).
+    needs: [release, candidate-bytes]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
