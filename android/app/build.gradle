@@ -1,0 +1,67 @@
+plugins {
+    id "com.android.application"
+    id "org.jetbrains.kotlin.android"
+}
+
+android {
+    namespace "com.vanipy.tagih"
+    compileSdk 34
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+
+    signingConfigs {
+        release {
+            def ksFile = System.getenv("SIGNING_KEYSTORE_PATH")
+            if (ksFile != null) {
+                storeFile file(ksFile)
+                storePassword System.getenv("SIGNING_STORE_PASSWORD")
+                keyAlias System.getenv("SIGNING_KEY_ALIAS")
+                keyPassword System.getenv("SIGNING_KEY_PASSWORD")
+            }
+        }
+    }
+
+    defaultConfig {
+        applicationId "com.vanipy.tagih"
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName "0.1.0"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    buildTypes {
+        release {
+            if (System.getenv("SIGNING_KEYSTORE_PATH") != null) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+}
+
+dependencies {
+    implementation "androidx.webkit:webkit:1.8.0"
+    androidTestImplementation "androidx.test.ext:junit:1.2.1"
+    androidTestImplementation "androidx.test:runner:1.6.2"
+    androidTestImplementation "androidx.test:rules:1.6.1"
+}
+
+// Single source of truth: ../web holds the only copy of the web app.
+// Sync it into assets at build time so the invoice logic is not duplicated.
+tasks.register("syncWebAssets", Copy) {
+    // ../web is the repo-root web/ directory, seen from this module (android/app).
+    from("../../web")
+    into("src/main/assets/web")
+    doLast {
+        if (!file("src/main/assets/web/index.html").exists()) {
+            throw new GradleException("syncWebAssets: web/index.html missing - web app was not bundled")
+        }
+    }
+}
+preBuild.dependsOn("syncWebAssets")

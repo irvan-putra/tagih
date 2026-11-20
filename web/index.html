@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tagih - local-first invoice tracker</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; margin: 0; background: #faf8f5;
+         color: #2b2118; line-height: 1.4; }
+  header { position: sticky; top: 0; background: #faf8f5; display: flex;
+           align-items: center; gap: 0.4rem; padding: 0.55rem 0.7rem;
+           border-bottom: 1px solid #e5ddd2; z-index: 5; }
+  header .name { font-weight: 700; font-size: 1.1rem; margin-right: auto; }
+  header button { border: none; border-radius: 8px; color: #fff;
+                  font: inherit; font-weight: 600; padding: 0.4rem 0.7rem;
+                  cursor: pointer; }
+  #btn-new { background: #92400e; }      /* unique on this screen */
+  #btn-export { background: #0f5257; }   /* unique on this screen */
+  #btn-menu { background: #6b5d4f; }
+  main { padding: 0.5rem 0.7rem 3rem; }
+  .card { background: #fff; border: 1px solid #e5ddd2; border-radius: 10px;
+          padding: 0.6rem 0.7rem; margin-bottom: 0.5rem; cursor: pointer; }
+  .card .top { display: flex; justify-content: space-between; gap: 0.5rem; }
+  .client { font-weight: 600; }
+  .num { font-size: 0.8rem; color: #8a7a68; }
+  .amounts { display: flex; justify-content: space-between; align-items: baseline;
+             margin-top: 0.25rem; }
+  .total { font-weight: 700; }
+  .due { font-size: 0.82rem; color: #8a7a68; }
+  .due.late { color: #c92a2a; font-weight: 600; }
+  .chip { font-size: 0.72rem; font-weight: 700; border-radius: 6px;
+          padding: 0.12rem 0.45rem; color: #fff; white-space: nowrap; }
+  .chip.draft { background: #868e96; }
+  .chip.sent { background: #1971c2; }
+  .chip.partial { background: #b8870f; }
+  .chip.paid { background: #2f9e44; }
+  .progress { height: 4px; background: #eee4d8; border-radius: 2px;
+              margin-top: 0.4rem; overflow: hidden; }
+  .progress > div { height: 100%; background: #2f9e44; }
+  .empty { text-align: center; color: #8a7a68; margin-top: 3rem; }
+  footer { position: fixed; bottom: 0; left: 0; right: 0; font-size: 0.72rem;
+           color: #a08d78; background: #faf8f5; padding: 0.25rem 0.7rem;
+           border-top: 1px solid #e5ddd2; }
+  /* overlays */
+  .overlay { position: fixed; inset: 0; background: #0006; z-index: 10;
+             display: flex; align-items: flex-start; justify-content: center; }
+  .sheet { background: #fff; margin: 1rem; border-radius: 12px; padding: 0.9rem;
+           width: 100%; max-width: 34rem; max-height: 88vh; overflow-y: auto; }
+  .sheet h2 { font-size: 1.05rem; margin: 0 0 0.6rem; }
+  label { display: block; font-size: 0.8rem; color: #6b5d4f; margin-top: 0.5rem; }
+  input, select, textarea { width: 100%; font: inherit; padding: 0.4rem 0.5rem;
+           border: 1px solid #cfc4b4; border-radius: 7px; background: #fff;
+           color: inherit; }
+  textarea { min-height: 3.2rem; }
+  .row { display: flex; gap: 0.5rem; }
+  .row > * { flex: 1; }
+  .actions { display: flex; gap: 0.5rem; margin-top: 0.9rem; flex-wrap: wrap; }
+  .actions button, .menu-list button { font: inherit; border-radius: 8px;
+           border: 1px solid #cfc4b4; background: #fff; color: inherit;
+           padding: 0.45rem 0.8rem; cursor: pointer; }
+  .actions .primary { background: #92400e; border-color: #92400e; color: #fff; }
+  .actions .danger { color: #c92a2a; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.88rem;
+          margin-top: 0.4rem; }
+  th, td { text-align: left; padding: 0.3rem 0.25rem; border-bottom: 1px solid #eee4d8; }
+  td.r, th.r { text-align: right; }
+  .menu-list { display: flex; flex-direction: column; gap: 0.4rem; }
+  .menu-list button { text-align: left; }
+  .note { font-size: 0.8rem; color: #8a7a68; }
+  .err { background: #c92a2a22; border-radius: 6px; padding: 0.4rem 0.5rem;
+         font-size: 0.85rem; margin-top: 0.5rem; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <span class="name">tagih</span>
+  <button id="btn-new" title="new invoice">＋ new</button>
+  <button id="btn-export" title="export JSON backup">⇩</button>
+  <button id="btn-menu" title="menu">⋮</button>
+</header>
+<main id="list"></main>
+<footer id="foot">local-first · nothing leaves this device</footer>
+
+<div class="overlay" id="ov-detail" hidden>
+  <div class="sheet" id="detail"></div>
+</div>
+<div class="overlay" id="ov-form" hidden>
+  <div class="sheet" id="form"></div>
+</div>
+<div class="overlay" id="ov-menu" hidden>
+  <div class="sheet">
+    <h2>menu</h2>
+    <div class="menu-list">
+      <button id="m-export-json">export JSON backup</button>
+      <button id="m-csv-inv">export invoices CSV</button>
+      <button id="m-csv-pay">export payments CSV</button>
+      <button id="m-import">import JSON backup…</button>
+      <button id="m-demo">load synthetic demo invoices</button>
+      <button id="m-arch">show archived</button>
+      <button id="m-about">about tagih</button>
+    </div>
+    <div class="actions"><button id="m-close">close</button></div>
+    <input type="file" id="import-file" accept="application/json,.json" hidden>
+  </div>
+</div>
+
+<script src="tagih.js"></script>
+<script>
+(function () {
+  "use strict";
+  var C = window.TagihCore;
+  var store = loadStore();
+  var showArchived = false;
+
+  function loadStore() {
+    try {
+      var raw = localStorage.getItem(C.STORAGE_KEY);
+      if (!raw) return C.emptyStore();
+      var s = JSON.parse(raw);
+      if (!s || !Array.isArray(s.invoices)) return C.emptyStore();
+      return s;
+    } catch (e) { return C.emptyStore(); }
+  }
+  function save() {
+    store.updated_at = new Date().toISOString();
+    localStorage.setItem(C.STORAGE_KEY, JSON.stringify(store));
+    renderFoot();
+  }
+  function renderFoot() {
+    var el = document.getElementById("foot");
+    el.textContent = "local-first · nothing leaves this device" +
+      (store.updated_at ? " · last change " + store.updated_at.slice(0, 16).replace("T", " ") : "");
+  }
+
+  /* ---------- list ---------- */
+  function renderList() {
+    var main = document.getElementById("list");
+    var today = C.todayStr();
+    var inv = store.invoices.filter(function (i) { return i.archived === showArchived; });
+    if (inv.length === 0) {
+      main.innerHTML = '<div class="empty">' +
+        (showArchived ? "no archived invoices" : "no invoices yet<br>tap ＋ new to create one") +
+        "</div>";
+      return;
+    }
+    var html = "";
+    C.sortForList(inv, today).forEach(function (i) {
+      var t = C.totals(i);
+      var s = C.statusOf(i, today);
+      var pct = t.total > 0 ? Math.min(100, Math.round(100 * t.paid / t.total)) : 0;
+      var due = s.status === "paid" ? "paid in full"
+        : s.overdue ? "due " + i.due + " · " + s.daysLate + "d late"
+        : "due " + i.due;
+      html += '<div class="card" data-id="' + i.id + '">' +
+        '<div class="top"><span class="client">' + esc(i.client) + '</span>' +
+        '<span class="chip ' + s.status + '">' + s.status + '</span></div>' +
+        '<div class="num">' + esc(i.number) + '</div>' +
+        '<div class="amounts"><span class="total">' + C.formatMoney(t.total, i.currency) + '</span>' +
+        '<span class="due' + (s.overdue ? " late" : "") + '">' + due + "</span></div>" +
+        (t.paid > 0 && s.status !== "paid"
+          ? '<div class="num">' + C.formatMoney(t.paid, i.currency) + " paid · " +
+            C.formatMoney(t.outstanding, i.currency) + ' left</div>' : "") +
+        '<div class="progress"><div style="width:' + pct + '%"></div></div>' +
+        "</div>";
+    });
+    main.innerHTML = html;
+    Array.prototype.forEach.call(main.querySelectorAll(".card"), function (el) {
+      el.addEventListener("click", function () { openDetail(el.getAttribute("data-id")); });
+    });
+  }
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  /* ---------- detail ---------- */
+  function findInv(id) {
+    for (var k = 0; k < store.invoices.length; k++)
+      if (store.invoices[k].id === id) return store.invoices[k];
+    return null;
+  }
+  function openDetail(id) {
+    var inv = findInv(id);
+    if (!inv) return;
+    var today = C.todayStr();
+    var t = C.totals(inv);
+    var s = C.statusOf(inv, today);
+    var html = '<h2>' + esc(inv.client) + ' <span class="num">' + esc(inv.number) + "</span></h2>" +
+      '<div><span class="chip ' + s.status + '">' + s.status + "</span>" +
+      (s.overdue ? ' <span class="due late">overdue by ' + s.daysLate + "d</span>" : "") + "</div>" +
+      '<table><tr><th>item</th><th class="r">qty</th><th class="r">price</th><th class="r">total</th></tr>';
+    inv.items.forEach(function (it) {
+      html += "<tr><td>" + esc(it.desc) + '</td><td class="r">' + it.qty + '</td>' +
+        '<td class="r">' + C.formatMoney(it.price_minor, inv.currency) + '</td>' +
+        '<td class="r">' + C.formatMoney(C.lineTotalMinor(it, inv.currency), inv.currency) + "</td></tr>";
+    });
+    html += '<tr><td colspan="3"><b>total</b></td><td class="r"><b>' +
+      C.formatMoney(t.total, inv.currency) + "</b></td></tr></table>" +
+      '<div class="note">issued ' + inv.issued + " · due " + inv.due + " · " + inv.currency + "</div>";
+    if (inv.notes) html += '<div class="note">notes: ' + esc(inv.notes) + "</div>";
+
+    html += "<h2 style='margin-top:0.8rem'>payments</h2>";
+    if (inv.payments.length === 0) html += '<div class="note">no payments recorded yet</div>';
+    inv.payments.forEach(function (p) {
+      html += '<div class="note">· ' + p.date + " — <b>" + C.formatMoney(p.amount_minor, inv.currency) +
+        "</b>" + (p.note ? " (" + esc(p.note) + ")" : "") + "</div>";
+    });
+    html += '<div class="note">paid ' + C.formatMoney(t.paid, inv.currency) + " of " +
+      C.formatMoney(t.total, inv.currency) + " · outstanding " +
+      C.formatMoney(t.outstanding, inv.currency) + "</div>";
+
+    if (!inv.archived && s.status !== "paid") {
+      html += '<h2 style="margin-top:0.8rem">record payment</h2>' +
+        '<div class="row"><div><label>amount (' + inv.currency + ")</label>" +
+        '<input id="pay-amount" type="number" min="0" step="any" value="' +
+        (t.outstanding / Math.pow(10, C.currencyInfo(inv.currency).decimals)) + '"></div>' +
+        '<div><label>date</label><input id="pay-date" type="date" value="' + today + '"></div></div>' +
+        '<label>note</label><input id="pay-note" placeholder="optional">';
+    }
+    html += '<div class="actions">';
+    if (!inv.archived && s.status !== "paid")
+      html += '<button class="primary" id="d-addpay">add payment</button>';
+    if (!inv.sent) html += '<button id="d-sent">mark sent</button>';
+    if (!inv.archived) html += '<button id="d-edit">edit</button>';
+    html += inv.archived
+      ? '<button id="d-unarch">unarchive</button>'
+      : '<button class="danger" id="d-arch">archive</button>';
+    html += '<button id="d-close">close</button></div>';
+    document.getElementById("detail").innerHTML = html;
+    show("ov-detail");
+
+    on("d-close", function () { hide("ov-detail"); });
+    on("d-sent", function () { inv.sent = true; save(); hide("ov-detail"); renderList(); });
+    on("d-edit", function () { hide("ov-detail"); openForm(inv); });
+    on("d-arch", function () { inv.archived = true; save(); hide("ov-detail"); renderList(); });
+    on("d-unarch", function () { inv.archived = false; save(); hide("ov-detail"); renderList(); });
+    on("d-addpay", function () {
+      var amt = document.getElementById("pay-amount").value;
+      var minor = C.toMinor(amt, inv.currency);
+      if (minor <= 0) return;
+      var date = document.getElementById("pay-date").value || today;
+      inv.payments.push(C.normPayment({
+        date: date, amount_minor: minor,
+        note: document.getElementById("pay-note").value
+      }, inv.currency));
+      save(); hide("ov-detail"); renderList(); openDetail(inv.id);
+    });
+  }
+
+  /* ---------- form (new / edit) ---------- */
+  function openForm(inv) {
+    var isNew = !inv;
+    var year = new Date().getFullYear();
+    if (isNew) {
+      inv = {
+        id: C.uid("inv"), number: C.nextInvoiceNumber(store.invoices, year),
+        client: "", currency: "IDR", issued: C.todayStr(), due: C.todayStr(),
+        notes: "", sent: false, archived: false,
+        items: [{ desc: "", qty: 1, price_minor: 0 }], payments: []
+      };
+    }
+    var html = "<h2>" + (isNew ? "new invoice" : "edit invoice") + "</h2>" +
+      '<div id="f-err" class="err" hidden></div>' +
+      "<label>client</label>" +
+      '<input id="f-client" value="' + esc(inv.client) + '" placeholder="who is being billed">' +
+      '<div class="row"><div><label>number</label>' +
+      '<input id="f-number" value="' + esc(inv.number) + '"></div>' +
+      "<div><label>currency</label><select id=\"f-cur\">" +
+      C.CURRENCIES.map(function (c) {
+        return '<option value="' + c.code + '"' + (c.code === inv.currency ? " selected" : "") +
+          ">" + c.code + "</option>";
+      }).join("") + "</select></div></div>" +
+      '<div class="row"><div><label>issued</label>' +
+      '<input id="f-issued" type="date" value="' + inv.issued + '"></div>' +
+      "<div><label>due</label>" +
+      '<input id="f-due" type="date" value="' + inv.due + '"></div></div>' +
+      "<label>items</label><div id=\"f-items\"></div>" +
+      '<div class="actions"><button id="f-additem" type="button">＋ item</button></div>' +
+      "<label>notes</label><textarea id=\"f-notes\">" + esc(inv.notes) + "</textarea>" +
+      '<div class="actions"><button class="primary" id="f-save">save</button>' +
+      '<button id="f-cancel">cancel</button></div>';
+    document.getElementById("form").innerHTML = html;
+    show("ov-form");
+
+    var itemsEl = document.getElementById("f-items");
+    function renderItems() {
+      var h = "";
+      inv.items.forEach(function (it, idx) {
+        h += '<div class="row" style="margin-bottom:0.3rem">' +
+          '<input data-i="' + idx + '" data-k="desc" placeholder="description" value="' + esc(it.desc) + '">' +
+          '<input data-i="' + idx + '" data-k="qty" type="number" min="0" step="any" style="max-width:4.5rem" value="' + it.qty + '">' +
+          '<input data-i="' + idx + '" data-k="price" type="number" min="0" step="any" style="max-width:7rem" value="' +
+            (it.price_minor / Math.pow(10, C.currencyInfo(inv.currency).decimals)) + '">' +
+          '<button type="button" data-del="' + idx + '" style="max-width:2.5rem">✕</button></div>';
+      });
+      itemsEl.innerHTML = h;
+      Array.prototype.forEach.call(itemsEl.querySelectorAll("input"), function (el) {
+        el.addEventListener("input", function () {
+          var i = +el.getAttribute("data-i"), k = el.getAttribute("data-k");
+          if (k === "desc") inv.items[i].desc = el.value;
+          else if (k === "qty") inv.items[i].qty = el.value;
+          else inv.items[i].price_minor = C.toMinor(el.value, inv.currency);
+        });
+      });
+      Array.prototype.forEach.call(itemsEl.querySelectorAll("button[data-del]"), function (el) {
+        el.addEventListener("click", function () {
+          inv.items.splice(+el.getAttribute("data-del"), 1);
+          renderItems();
+        });
+      });
+    }
+    renderItems();
+    document.getElementById("f-cur").addEventListener("change", function (e) {
+      inv.currency = e.target.value; renderItems();
+    });
+    on("f-additem", function () {
+      inv.items.push({ desc: "", qty: 1, price_minor: 0 }); renderItems();
+    });
+    on("f-cancel", function () { hide("ov-form"); });
+    on("f-save", function () {
+      var err = document.getElementById("f-err");
+      try {
+        var norm = C.normInvoice({
+          id: inv.id,
+          number: document.getElementById("f-number").value,
+          client: document.getElementById("f-client").value,
+          currency: document.getElementById("f-cur").value,
+          issued: document.getElementById("f-issued").value,
+          due: document.getElementById("f-due").value,
+          notes: document.getElementById("f-notes").value,
+          sent: inv.sent, archived: inv.archived,
+          items: inv.items, payments: inv.payments
+        });
+      } catch (e) {
+        err.textContent = e.message; err.hidden = false; return;
+      }
+      if (isNew) store.invoices.push(norm);
+      else {
+        for (var k = 0; k < store.invoices.length; k++)
+          if (store.invoices[k].id === norm.id) { store.invoices[k] = norm; break; }
+      }
+      save(); hide("ov-form"); renderList();
+    });
+  }
+
+  /* ---------- export / import ---------- */
+  function b64(text) {
+    var bytes = new TextEncoder().encode(text), bin = "";
+    for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin);
+  }
+  function saveFile(text, filename, mime) {
+    if (window.TagihBridge && window.TagihBridge.saveFile) {
+      window.TagihBridge.saveFile(b64(text), filename, mime);
+      return;
+    }
+    var blob = new Blob([text], { type: mime });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  }
+  function stamp() { return C.todayStr(); }
+  window.tagihExport = function (kind) {
+    var name, text, mime;
+    if (kind === "csv-pay") {
+      name = "tagih-payments-" + stamp() + ".csv"; text = C.paymentsCSV(store); mime = "text/csv";
+    } else if (kind === "csv-inv") {
+      name = "tagih-invoices-" + stamp() + ".csv"; text = C.invoicesCSV(store); mime = "text/csv";
+    } else {
+      name = "tagih-backup-" + stamp() + ".json"; text = C.exportJSON(store); mime = "application/json";
+    }
+    saveFile(text, name, mime);
+    return name;
+  };
+
+  /* ---------- menu ---------- */
+  function show(id) { document.getElementById(id).hidden = false; }
+  function hide(id) { document.getElementById(id).hidden = true; }
+  function on(id, fn) {
+    var el = document.getElementById(id);
+    if (el) el.addEventListener("click", fn);
+  }
+  on("btn-new", function () { openForm(null); });
+  on("btn-export", function () { window.tagihExport("json"); });
+  on("btn-menu", function () {
+    document.getElementById("m-arch").textContent =
+      showArchived ? "show active" : "show archived";
+    show("ov-menu");
+  });
+  on("m-close", function () { hide("ov-menu"); });
+  on("m-export-json", function () { window.tagihExport("json"); hide("ov-menu"); });
+  on("m-csv-inv", function () { window.tagihExport("csv-inv"); hide("ov-menu"); });
+  on("m-csv-pay", function () { window.tagihExport("csv-pay"); hide("ov-menu"); });
+  on("m-arch", function () { showArchived = !showArchived; hide("ov-menu"); renderList(); });
+  on("m-about", function () {
+    hide("ov-menu");
+    document.getElementById("detail").innerHTML =
+      "<h2>tagih</h2><div class='note'>local-first invoice tracker: create invoices, " +
+      "track due dates, record partial and full payments, export your records. " +
+      "All data stays in this app on this device; there is no account, no server, " +
+      "no connection to any bank or payment service, and no money moves here.</div>" +
+      "<div class='note' style='margin-top:0.5rem'>source: " +
+      "<a href='https://github.com/irvan-putra/tagih'>github.com/irvan-putra/tagih</a> · AGPL-3.0</div>" +
+      '<div class="actions"><button id="d-close">close</button></div>';
+    show("ov-detail");
+    on("d-close", function () { hide("ov-detail"); });
+  });
+  on("m-demo", function () {
+    hide("ov-menu");
+    var today = C.todayStr();
+    var y = new Date().getFullYear();
+    var demo = [
+      { number: y + "-901", client: "PT Contoh Jaya (fiktif)", currency: "IDR",
+        issued: today, due: today, notes: "synthetic demo invoice",
+        sent: true, items: [{ desc: "Jasa desain poster (contoh)", qty: 1, price_minor: 2500000 }],
+        payments: [] },
+      { number: y + "-902", client: "CV Fiksi Digital (fiktif)", currency: "IDR",
+        issued: today, due: today, notes: "synthetic demo invoice",
+        sent: true, items: [
+          { desc: "Penulisan artikel blog (contoh)", qty: 4, price_minor: 750000 },
+          { desc: "Revisi tambahan (contoh)", qty: 1, price_minor: 500000 }],
+        payments: [{ date: today, amount_minor: 1500000, note: "uang muka (contoh)" }] },
+      { number: y + "-903", client: "Studio Andaikan (fiktif)", currency: "USD",
+        issued: today, due: today, notes: "synthetic demo invoice",
+        sent: false, items: [{ desc: "Konsultasi teknis (contoh)", qty: 2, price_minor: 12000 }],
+        payments: [] }
+    ].map(function (d) { return C.normInvoice(d); });
+    var n = C.mergeImport(store, demo);
+    save(); renderList();
+    alert(n + " synthetic demo invoices added");
+  });
+  document.getElementById("m-import").addEventListener("click", function () {
+    document.getElementById("import-file").click();
+  });
+  document.getElementById("import-file").addEventListener("change", function (e) {
+    var f = e.target.files && e.target.files[0];
+    if (!f) return;
+    var rd = new FileReader();
+    rd.onload = function () {
+      try {
+        var n = C.mergeImport(store, C.parseImport(String(rd.result)));
+        save(); hide("ov-menu"); renderList();
+        alert("imported " + n + " invoice(s) from " + f.name);
+      } catch (err) {
+        alert("could not import " + f.name + ": " + err.message);
+      }
+    };
+    rd.readAsText(f);
+    e.target.value = "";
+  });
+
+  renderFoot();
+  renderList();
+})();
+</script>
+</body>
+</html>
