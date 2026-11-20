@@ -98,7 +98,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           VER="${{ needs.release.outputs.version }}"
+          # -R: the publish job has no checkout, so gh cannot infer the repo
           gh release create "v${VER}" "dist/tagih-v${VER}.apk" "dist/tagih-v${VER}.apk.sha256" \
+            -R "${{ github.repository }}" \
             --title "tagih ${VER}" --generate-notes --prerelease --target "${GITHUB_SHA}"
 
   verify:
