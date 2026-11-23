@@ -3,7 +3,7 @@
     <!-- No INTERNET permission: the app runs fully offline from bundled assets. -->
     <application
         android:label="tagih"
-        android:icon="@mipmap/ic_launcher"
+        android:icon="@drawable/ic_launcher"
         android:supportsRtl="true">
         <activity
             android:name=".MainActivity"
