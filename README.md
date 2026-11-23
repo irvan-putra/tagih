@@ -10,6 +10,10 @@ this app. It only keeps the records you type into it.
 
 Status: early prototype.
 
+Install: signed APKs from the
+[releases page](https://github.com/irvan-putra/tagih/releases), also listed
+with checksums in the [kaji gallery](https://vanipy.com/kaji/apk/).
+
 ## What it does
 
 - **Invoices**: client name, numbered invoices (`2026-001`, …), line items
@@ -51,7 +55,9 @@ its release artifacts contain no real client or payment records.
 Package `com.vanipy.tagih`, launcher name `tagih`, no permissions (not even
 INTERNET). Signed release APKs are on the
 [releases page](https://github.com/irvan-putra/tagih/releases) as
-`tagih-v<version>.apk` with a `.sha256` sidecar. The release workflow runs
+`tagih-v<version>.apk`. The trusted checksum is GitHub's per-asset digest
+on each release asset; the v0.1.0 release also carries a legacy
+`.apk.sha256` sidecar, kept but no longer published for new releases. The release workflow runs
 the family consistency gate ([patuh](https://github.com/irvan-putra/patuh))
 on the source and on the actual candidate APK bytes before publishing, and
 verifies the live release afterwards.
